@@ -199,7 +199,6 @@ void tick() {
   }
   if ( count % sixteenthsPerBeat == 0 ) {
     //Serial.print("Beat. Count: "); Serial.println(count);
-    beat = true;
     digitalWrite(QUARTER, HIGH);
     digitalWrite(BLINKER, HIGH);
   }
@@ -220,8 +219,7 @@ void tick() {
   }
 
   BPM = map(analogRead(BPM_IN), 0, 1023, min_BPM, max_BPM);
-  int cycleTime = (60000 / BPM) / sixteenthsPerBeat - (millis() - startTime);
-
+  
   dutyCycle = map(analogRead(DUTY_IN), 0, 1023, 1, 90);
   if (dutyCycle != lastDutyCycle) {
     updateLED((int)dutyCycle);
@@ -230,10 +228,11 @@ void tick() {
     lastBpm = BPM;
     updateLED(BPM);
   }
-
+  
   // Subtract the time it took to get through this function from our delay
   int diff = millis() - startTime;
-  Serial.println(diff);
+  int cycleTime = (60000 / BPM) / sixteenthsPerBeat - diff;
+  //Serial.print("Diff: "); Serial.println(diff);
   float nextStartDelay = cycleTime - diff;
   float nextStopDelay = (cycleTime * (dutyCycle / 100) - diff);
   
@@ -245,18 +244,32 @@ void tick() {
  * tock - turn off all gates
  */
 void tock() {
+  
   digitalWrite(SIXTEENTH, LOW);
-  digitalWrite(EIGHTH, LOW);
-  digitalWrite(QUARTER, LOW);
-  digitalWrite(HALF, LOW);
-  digitalWrite(WHOLE, LOW);
-  digitalWrite(TWO, LOW);
-  digitalWrite(FOUR, LOW);
-  digitalWrite(EIGHT, LOW);
-  if ( beat ) {
-    digitalWrite(BLINKER, LOW);
-    beat = false;
+  if ( count % sixteenthsPerEighth == 0 ) {
+    digitalWrite(EIGHTH, LOW);
   }
+  if ( count % sixteenthsPerBeat == 0 ) {
+    //Serial.print("Beat. Count: "); Serial.println(count);
+    digitalWrite(QUARTER, LOW);
+    digitalWrite(BLINKER, LOW);
+  }
+  if ( count % (sixteenthsPerBar / 2) == 0 ) {
+    digitalWrite(HALF, LOW);
+  }
+  if ( count % (sixteenthsPerBar) == 0 ) {
+    digitalWrite(WHOLE, LOW);
+  }
+  if ( count % (sixteenthsPerBar * 2) == 0 ) {
+    digitalWrite(TWO, LOW);
+  }
+  if ( count % (sixteenthsPerBar * 4) == 0 ) {
+    digitalWrite(FOUR, LOW);
+  }
+  if ( count == 0 ) {
+    digitalWrite(EIGHT, LOW);
+  }
+
   count++;
 
   if ( count == sixteenthsPerBar * 8 ) {
