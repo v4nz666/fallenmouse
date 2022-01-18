@@ -46,8 +46,8 @@ float lastBpm = 0;
 float dutyCycle;
 float lastDutyCycle = 0;
 
-int max_BPM = 282;
-int min_BPM = 90;
+int max_BPM = 240;
+int min_BPM = 60;
 
 
 const bool blank[8] = {0, 0, 0, 0, 0, 0, 0, 0};
