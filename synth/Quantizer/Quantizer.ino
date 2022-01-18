@@ -1,3 +1,5 @@
+//#define DEBUG
+
 /*******************************
  * PINS
  */
@@ -72,7 +74,15 @@ bool scaleUpdated = true;
  * Setup pinModes, initialize SPI pins to known state
  */
 void setup() {
-  Serial.begin(9600);
+  #ifdef DEBUG
+    Serial.begin(9600);
+    Serial.println("Debugging");
+    for (int x=0; x<1024; x++) {
+      getNote(x);
+      delay(25);
+    }
+    while(1);
+  #endif
 
   pinMode(INA, INPUT);
   pinMode(INB, INPUT);
@@ -94,7 +104,11 @@ void setup() {
 }
 
 void loop() {
-
+  #ifdef DEBUG
+    delay(1);
+    return;
+  #endif
+  
   checkScale();
   if ( scaleUpdated ) {
     outputScale();
@@ -180,10 +194,19 @@ int quantize(int note){
  */
 int getNote(int in) {
   // Shift value up by half of the to account for integer division flooring the result below
-  float adjusted = in + (semiTone / 2);
-  int note = adjusted / semiTone;
+  float adjusted = in; // + (semiTone / 2);
+  int note = in / semiTone;
+
+  note = quantize(note);
   
-  return quantize(note);
+  #ifdef DEBUG
+    char buffer[80];
+    int n = sprintf(buffer, "In[%d] adjusted[%s] quantized[%d]", in, String(adjusted).c_str(), note);
+    Serial.println(buffer);
+    
+  #endif
+  
+  return note;
 }
 
 void toDAC(int select, int pin) {
