@@ -1,3 +1,5 @@
+//#define DEBUG
+
 #include <SimpleTimer.h>
 
 const int BPM_IN = A7;
@@ -21,7 +23,6 @@ const int EIGHT = 9;
 const int RESET = 10;
 
 const int BLINKER = 13;
-bool beat;
 
 int sixteenthsPerEighth;
 int eighthsPerQuarter;
@@ -32,6 +33,8 @@ int last_quartersPerBar;
 
 int sixteenthsPerBeat;
 int sixteenthsPerBar;
+
+int cycleTime;
 
 SimpleTimer timer;
 
@@ -49,6 +52,9 @@ float lastDutyCycle = 0;
 int max_BPM = 240;
 int min_BPM = 60;
 
+#ifdef DEBUG
+  unsigned long lastEight = 0;
+#endif
 
 const bool blank[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 const bool digits[10][8] = {
@@ -65,9 +71,12 @@ const bool digits[10][8] = {
 };
 
 void setup() {
-  Serial.begin(9600);
-
+  #ifdef DEBUG
+    Serial.begin(9600);
+  #endif
+  
   pinMode(BPM_IN, INPUT);
+  pinMode(DUTY_IN, INPUT);
 
   pinMode(CLK, OUTPUT);
   pinMode(DATA, OUTPUT);
@@ -86,42 +95,40 @@ void setup() {
   pinMode(QUARTERS_PER_BAR_IN, INPUT_PULLUP);
 
   pinMode(RESET, INPUT_PULLUP);
+  
+  gatesOff();
+  checkDivisionToggles();
+  readPots();
   intro();
-
 }
 
 void loop() {
-  //Serial.print("loop "); Serial.println(started ? "true": "false");
   if (!started) {
     started = true;
     tick();
   }
-
   timer.run();
 }
 
 void reset() {
-  
-  tock();
-  updateLED(666);
-  
   started = false;
   count = 0;
-
+  
+  gatesOff();
+  updateLED(666);
   delay(1000);
 
   while ( digitalRead(RESET) == LOW ) {
     delay(10);
   }
   updateLED(BPM);
-  
 }
 
 void resetDivs() {
   int divs = 100*sixteenthsPerEighth + 10*eighthsPerQuarter + quartersPerBar;
   updateLED(divs);
-  delay(1000);
-  reset();
+  //delay(1000);
+  //reset();
 }
 
 bool checkDivisionToggles() {
@@ -159,6 +166,22 @@ bool checkDivisionToggles() {
       divsChanged = true;
       last_quartersPerBar = quartersPerBar;
   }
+
+  sixteenthsPerBeat = (eighthsPerQuarter * sixteenthsPerEighth);
+  sixteenthsPerBar = sixteenthsPerBeat * quartersPerBar;
+
+  #ifdef DEBUG
+//    Serial.print("Checked toggles: ");
+//    Serial.print("spe:");
+//    Serial.print(sixteenthsPerEighth);
+//    Serial.print(" epq:");
+//    Serial.print(eighthsPerQuarter);
+//    Serial.print(" spq:");
+//    Serial.print(sixteenthsPerBeat);
+//    Serial.print(" spb:");
+//    Serial.println(sixteenthsPerBar);
+  #endif
+  
   return divsChanged;
 }
 
@@ -172,8 +195,10 @@ bool checkDivisionToggles() {
 void tick() {
   int startTime = millis();
 
+  cycleTime = (60000 / BPM) / sixteenthsPerBeat;
+  timer.setTimeout(cycleTime, tick);
+
   if ( !started ) {
-    //Serial.println("Aborting");
     return;
   }
   
@@ -182,45 +207,53 @@ void tick() {
     return;
   }
   
-  bool divsChanged = checkDivisionToggles();
-  
-  if ( divsChanged ) {
-    sixteenthsPerBeat = (eighthsPerQuarter * sixteenthsPerEighth);
-    sixteenthsPerBar = sixteenthsPerBeat * quartersPerBar;
+  if ( checkDivisionToggles() ) {
     resetDivs();
-    //Serial.println("DivsChanged");
-    return;
   }
-  
-  
+
   digitalWrite(SIXTEENTH, HIGH);
+  timer.setTimeout(scheduleOff(1, startTime), sixteenthOff);
+  
   if ( count % sixteenthsPerEighth == 0 ) {
     digitalWrite(EIGHTH, HIGH);
+    timer.setTimeout(scheduleOff(sixteenthsPerEighth, startTime), eighthOff);
   }
+  
   if ( count % sixteenthsPerBeat == 0 ) {
     //Serial.print("Beat. Count: "); Serial.println(count);
     digitalWrite(QUARTER, HIGH);
     digitalWrite(BLINKER, HIGH);
+    timer.setTimeout(scheduleOff(sixteenthsPerBeat, startTime), quarterOff);
   }
+  
   if ( count % (sixteenthsPerBar / 2) == 0 ) {
     digitalWrite(HALF, HIGH);
+    timer.setTimeout(scheduleOff(sixteenthsPerBar / 2, startTime), halfOff);
   }
+  
   if ( count % (sixteenthsPerBar) == 0 ) {
     digitalWrite(WHOLE, HIGH);
+    timer.setTimeout(scheduleOff(sixteenthsPerBar, startTime), wholeOff);
   }
+  
   if ( count % (sixteenthsPerBar * 2) == 0 ) {
     digitalWrite(TWO, HIGH);
+    timer.setTimeout(scheduleOff(sixteenthsPerBar * 2, startTime), twoOff);
   }
+  
   if ( count % (sixteenthsPerBar * 4) == 0 ) {
     digitalWrite(FOUR, HIGH);
+    timer.setTimeout(scheduleOff(sixteenthsPerBar * 4, startTime), fourOff);
   }
+  
   if ( count == 0 ) {
     digitalWrite(EIGHT, HIGH);
+    unsigned int _delay = scheduleOff(sixteenthsPerBar * 8, startTime);
+    timer.setTimeout(_delay, eightOff);
   }
 
-  BPM = map(analogRead(BPM_IN), 0, 1023, min_BPM, max_BPM);
+  readPots();
   
-  dutyCycle = map(analogRead(DUTY_IN), 0, 1023, 1, 90);
   if (dutyCycle != lastDutyCycle) {
     updateLED((int)dutyCycle);
     lastDutyCycle = dutyCycle;
@@ -229,52 +262,85 @@ void tick() {
     updateLED(BPM);
   }
   
-  // Subtract the time it took to get through this function from our delay
-  int diff = millis() - startTime;
-  int cycleTime = (60000 / BPM) / sixteenthsPerBeat - diff;
-  //Serial.print("Diff: "); Serial.println(diff);
-  float nextStartDelay = cycleTime - diff;
-  float nextStopDelay = (cycleTime * (dutyCycle / 100) - diff);
-  
-  timer.setTimeout(nextStartDelay, tick);
-  timer.setTimeout(nextStopDelay, tock);
-}
-
-/**
- * tock - turn off all gates
- */
-void tock() {
-  
-  digitalWrite(SIXTEENTH, LOW);
-  if ( count % sixteenthsPerEighth == 0 ) {
-    digitalWrite(EIGHTH, LOW);
-  }
-  if ( count % sixteenthsPerBeat == 0 ) {
-    //Serial.print("Beat. Count: "); Serial.println(count);
-    digitalWrite(QUARTER, LOW);
-    digitalWrite(BLINKER, LOW);
-  }
-  if ( count % (sixteenthsPerBar / 2) == 0 ) {
-    digitalWrite(HALF, LOW);
-  }
-  if ( count % (sixteenthsPerBar) == 0 ) {
-    digitalWrite(WHOLE, LOW);
-  }
-  if ( count % (sixteenthsPerBar * 2) == 0 ) {
-    digitalWrite(TWO, LOW);
-  }
-  if ( count % (sixteenthsPerBar * 4) == 0 ) {
-    digitalWrite(FOUR, LOW);
-  }
-  if ( count == 0 ) {
-    digitalWrite(EIGHT, LOW);
-  }
-
   count++;
-
   if ( count == sixteenthsPerBar * 8 ) {
     count = 0;
   }
+}
+
+void readPots() {
+  BPM = map(analogRead(BPM_IN), 0, 1023, min_BPM, max_BPM);
+  dutyCycle = map(analogRead(DUTY_IN), 0, 1023, 1, 90);
+}
+
+void sixteenthOff() {
+  digitalWrite(SIXTEENTH, LOW);
+}
+void eighthOff() {
+  digitalWrite(EIGHTH, LOW);
+}
+void quarterOff() {
+  digitalWrite(QUARTER, LOW);
+}
+void halfOff() {
+  digitalWrite(HALF, LOW);
+}
+void wholeOff() {
+  digitalWrite(WHOLE, LOW);
+}
+void twoOff() {
+  digitalWrite(TWO, LOW);
+}
+void fourOff() {
+  digitalWrite(FOUR, LOW);
+}
+void eightOff() {
+  #ifdef DEBUG
+    Serial.println("8-bar Off");
+  #endif
+
+  digitalWrite(EIGHT, LOW);
+}
+
+float scheduleOff(int multiplier, int startTime) {
+  int diff = millis() - startTime;
+  int _delay = (cycleTime * multiplier * (dutyCycle / 100)) - diff;
+  #ifdef DEBUG
+    Serial.print("Count: ");
+    Serial.print(count);
+    Serial.print(" Multiplier: ");
+    Serial.print(multiplier);
+    Serial.print(" Diff: ");
+    Serial.print(diff);
+    Serial.print(" Calculated Delay: ");
+    Serial.print(_delay);
+    Serial.print("ms. cycleTime: ");
+    Serial.println(cycleTime);
+  #endif
+  return _delay;
+}
+
+/**
+ * turn off all gates
+ */
+void gatesOff() {
+  #ifdef DEBUG
+    Serial.print("Setting all gates to LOW");
+  #endif
+
+  digitalWrite(SIXTEENTH, LOW);
+  digitalWrite(EIGHTH, LOW);
+  digitalWrite(QUARTER, LOW);
+  digitalWrite(BLINKER, LOW);
+  digitalWrite(HALF, LOW);
+  digitalWrite(WHOLE, LOW);
+  digitalWrite(TWO, LOW);
+  digitalWrite(FOUR, LOW);
+  digitalWrite(EIGHT, LOW);
+  
+  #ifdef DEBUG
+    Serial.println();
+  #endif
 }
 
 /***
@@ -289,19 +355,21 @@ void intro() {
   digitalWrite(CLK, LOW);
   updateLED(666);
   delay(250);
-  updateLED(999);
+  updateLED(669);
+  delay(250);
+  updateLED(696);
+  delay(250);
+  updateLED(966);
   delay(250);
   updateLED(666);
   delay(250);
-  updateLED(999);
+  updateLED(669);
+  delay(250);
+  updateLED(696);
+  delay(250);
+  updateLED(966);
   delay(250);
   updateLED(666);
-  delay(250);
-  updateLED(999);
-  delay(250);
-  updateLED(666);
-  delay(250);
-  updateLED(999);
   delay(250);
 }
 
